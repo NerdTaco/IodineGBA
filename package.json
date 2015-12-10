@@ -1,0 +1,23 @@
+{
+  "name": "iodinegba",
+  "version": "1.0.0",
+  "description": "JavaScript GameBoy Advance Emulator\r =================================",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "http-server"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NerdTaco/IodineGBA.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NerdTaco/IodineGBA/issues"
+  },
+  "homepage": "https://github.com/NerdTaco/IodineGBA#readme",
+  "devDependencies": {
+    "http-server": "^0.8.5"
+  }
+}
