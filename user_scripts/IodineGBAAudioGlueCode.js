@@ -11,22 +11,15 @@
 function GlueCodeMixer() {
     var parentObj = this;
     this.audio = new XAudioServer(2, this.sampleRate, 0, this.bufferAmount, null, function () {
-        //Web Audio API Should fire this, moz audio api will NOT:
-        if (parentObj.heartBeat) {
-            clearInterval(parentObj.heartBeat);
-            parentObj.heartBeat = null;
-        }
-        parentObj.checkAudio();
-     }, 1, function () {
+        parentObj.checkHeartbeats();
+    }, function () {
+        parentObj.checkPostHeartbeats();
+    }, 1, function () {
         //Disable audio in the callback here:
         parentObj.disableAudio();
     });
     this.outputUnits = [];
     this.outputUnitsValid = [];
-    this.heartBeat = setInterval(function(){
-        //Moz Audio API needs this:
-        parentObj.checkAudio();
-    }, 16);
     this.initializeBuffer();
 }
 GlueCodeMixer.prototype.sampleRate = 44100;
@@ -60,6 +53,18 @@ GlueCodeMixer.prototype.unregister = function (stackPosition) {
         }
     }
 }
+GlueCodeMixer.prototype.checkHeartbeats = function () {
+    var inputCount = this.outputUnitsValid.length;
+    for (var inputIndex = 0, output = 0; inputIndex < inputCount; ++inputIndex) {
+        this.outputUnitsValid[inputIndex].heartBeatCallback();
+    }
+}
+GlueCodeMixer.prototype.checkPostHeartbeats = function () {
+    var inputCount = this.outputUnitsValid.length;
+    for (var inputIndex = 0, output = 0; inputIndex < inputCount; ++inputIndex) {
+        this.outputUnitsValid[inputIndex].postHeartBeatCallback();
+    }
+}
 GlueCodeMixer.prototype.checkAudio = function () {
     if (this.audio) {
         var inputCount = this.outputUnitsValid.length;
@@ -80,7 +85,7 @@ GlueCodeMixer.prototype.checkAudio = function () {
 GlueCodeMixer.prototype.findLowestBufferCount = function () {
     var count = 0;
     for (var inputIndex = 0, inputCount = this.outputUnitsValid.length; inputIndex < inputCount; ++inputIndex) {
-        var tempCount = this.outputUnitsValid[inputIndex].buffer.remainingBuffer();
+        var tempCount = this.outputUnitsValid[inputIndex].buffer.resampledSamplesLeft();
         if (tempCount > 0) {
             if (count > 0) {
                 count = Math.min(count, tempCount);
@@ -99,10 +104,12 @@ function GlueCodeMixerInput(mixer) {
     this.mixer = mixer;
     this.volume = 1;
 }
-GlueCodeMixerInput.prototype.initialize = function (channelCount, sampleRate, bufferAmount, errorCallback) {
+GlueCodeMixerInput.prototype.initialize = function (channelCount, sampleRate, bufferAmount, heartBeatCallback, postHeartBeatCallback, errorCallback) {
     this.channelCount = channelCount;
     this.sampleRate = sampleRate;
     this.bufferAmount = bufferAmount;
+    this.heartBeatCallback = heartBeatCallback;
+    this.postHeartBeatCallback = postHeartBeatCallback;
     this.errorCallback = errorCallback;
     var oldBuffer = this.buffer;
     this.buffer = new AudioBufferWrapper(this.channelCount,
@@ -129,6 +136,12 @@ GlueCodeMixerInput.prototype.shift = function () {
 }
 GlueCodeMixerInput.prototype.push = function (buffer, upTo) {
     this.buffer.push(buffer, upTo);
+    this.mixer.checkAudio();
+}
+GlueCodeMixerInput.prototype.pushDeferred = function (buffer, upTo) {
+    this.buffer.push(buffer, upTo);
+}
+GlueCodeMixerInput.prototype.flush = function () {
     this.mixer.checkAudio();
 }
 GlueCodeMixerInput.prototype.remainingBuffer = function () {
@@ -158,9 +171,9 @@ function AudioBufferWrapper(channelCount,
 AudioBufferWrapper.prototype.initialize = function () {
     this.inBufferSize = this.bufferAmount * this.mixerChannelCount;
     this.inBuffer = getFloat32Array(this.inBufferSize);
-    this.outBufferSize = (Math.ceil(this.inBufferSize * this.mixerSampleRate / this.sampleRate / this.mixerChannelCount) * this.mixerChannelCount) + this.mixerChannelCount;
+    this.resampler = new Resampler(this.sampleRate, this.mixerSampleRate, this.mixerChannelCount, this.inBuffer);
+    this.outBufferSize = this.resampler.outputBuffer.length;
     this.outBuffer = getFloat32Array(this.outBufferSize);
-    this.resampler = new Resampler(this.sampleRate, this.mixerSampleRate, this.mixerChannelCount, this.outBufferSize, true);
     this.inputOffset = 0;
     this.resampleBufferStart = 0;
     this.resampleBufferEnd = 0;
@@ -222,7 +235,7 @@ AudioBufferWrapper.prototype.shift = function () {
 AudioBufferWrapper.prototype.resampleRefill = function () {
     if (this.inputOffset > 0) {
         //Resample a chunk of audio:
-        var resampleLength = this.resampler.resampler(this.inBuffer, this.inputOffset);
+        var resampleLength = this.resampler.resampler(this.inputOffset);
         var resampledResult = this.resampler.outputBuffer;
         for (var index2 = 0; index2 < resampleLength;) {
             this.outBuffer[this.resampleBufferEnd++] = resampledResult[index2++];
